@@ -1,0 +1,81 @@
+name: PHP Syntax Lint, Architecture Guards & Unit Tests CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  ci-checks:
+    name: PHP 8.2 Lint, Composer Validate, Architecture & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo, pdo_mysql, json
+          tools: composer:v2
+          coverage: none
+
+      - name: Step 1 - Recursive PHP Syntax Check (php -l)
+        run: |
+          set -e
+          echo "Scanning all PHP files outside vendor/..."
+          FILE_COUNT=0
+          while IFS= read -r -d '' file; do
+            php -l "$file"
+            FILE_COUNT=$((FILE_COUNT + 1))
+          done < <(find . -path './vendor' -prune -o -name '*.php' -type f -print0)
+          echo "Verified ${FILE_COUNT} PHP files with 0 syntax errors."
+
+      - name: Step 2 - Validate composer.json
+        run: composer validate --no-check-publish --strict
+
+      - name: Step 3 - Open Source, Clean Architecture & DevSecOps Guards
+        run: |
+          set -e
+          for req in README.md LICENSE .env.example .gitignore database/huit_db.sql CONTRIBUTING.md CHANGELOG.md; do
+            if [ ! -f "$req" ]; then
+              echo "ERROR: Missing required Open Source file: $req"
+              exit 1
+            fi
+          done
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "ERROR: Secret file .env MUST NOT be tracked by Git!"
+            exit 1
+          fi
+          if git ls-files vendor/ | grep -q .; then
+            echo "ERROR: Directory vendor/ MUST NOT be tracked by Git!"
+            exit 1
+          fi
+          php -r '
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("views")) as $f) {
+              if ($f->isFile() && $f->getExtension() === "php") {
+                $c = file_get_contents($f->getPathname());
+                if (preg_match("/\b(PDO|SELECT\s+[\w\*]+\s+FROM|INSERT\s+INTO|DELETE\s+FROM)\b/i", $c)) {
+                  fwrite(STDERR, "ERROR: Direct SQL/PDO detected in view: " . $f->getPathname() . "\n");
+                  exit(1);
+                }
+              }
+            }
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator("src")) as $f) {
+              if ($f->isFile() && $f->getExtension() === "php") {
+                if (!str_contains(file_get_contents($f->getPathname()), "declare(strict_types=1);")) {
+                  fwrite(STDERR, "ERROR: Missing strict_types in: " . $f->getPathname() . "\n");
+                  exit(1);
+                }
+              }
+            }
+            echo "Architecture static guards passed (0 SQL in views/, 100% strict_types in src/).\n";
+          '
+
+      - name: Step 4 - Install Composer Dependencies & Run Pure PHP Unit Tests
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          php tests/unit_tests.php

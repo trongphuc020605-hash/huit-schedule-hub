@@ -1,0 +1,29 @@
+# Composer dependencies
+/vendor/
+
+# Environment secrets
+.env
+.env.local
+.env.*.local
+
+# Logs & temporary files
+*.log
+/logs/
+/storage/logs/
+/tmp/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PHP cache & test artifacts
+.phpunit.result.cache
+*.cache
